@@ -1,3 +1,4 @@
+At first you need a gmail account and chrome browser to use this scripts. 
 
 1) OPEN THE PYTHON FILE AS A NOTEPAD
 
@@ -14,15 +15,14 @@ MAIL_TO   = "yourGmail or another Gmail@gmail.com"     # your Gmail or another G
 4) Fill this blanks with your personal Informations and save.
 
 5) open the cmd (Windows + R)
-6) Input this propts in order:
+6) Input these prompts in order:
 
 cd C:\Users\Downloads\mainz_bot
 venv\Scripts\activate
 python mainz_termin_bot.py
 
-7) If everthing is okey, you will see this: 
-
-[DAY, DATE ...] found=None last_known=None in_window=False earlier_than_last=False
+7) If everthing is okey, you will see an E-Mail in your gmail postbox. 
 
 8) If you see this, it works perfectly. 
+
 
