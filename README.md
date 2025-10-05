@@ -25,7 +25,7 @@ Whenever an earlier appointment is released (for example, due to cancellation), 
 
 ---
 
-## 🧩 Configuration  
+##  Configuration  
 
 The default configuration can be modified in the script:  
 
@@ -66,7 +66,7 @@ playwright install
 
 ---
 
-## 🧠 Example Workflow  
+##  Example Workflow  
 
 1. The bot starts and launches a headless Chrome instance.  
 2. It opens the Mainz Bürgeramt appointment page and navigates to the “Überträge von Aufenthaltstiteln (neuer Pass)” section.  
@@ -76,7 +76,7 @@ playwright install
 
 ---
 
-## 🛠 Customization  
+##  Customization  
 
 To change the default values, modify the variables near the top of the script:  
 
@@ -92,7 +92,7 @@ You can also customize:
 
 ---
 
-## ⚠️ Disclaimer  
+##  Disclaimer  
 
 This project is for **personal and educational purposes only**.  
 It should not be used for large-scale scraping or violating website terms of service.  
