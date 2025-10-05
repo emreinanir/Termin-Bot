@@ -17,23 +17,20 @@ try:
 except locale.Error:
     pass
 
-# .env dosyasını yükle
-# load_dotenv(encoding="utf-8-sig")
-
-# --- Ayarlar ---
+# --- Ayarlar (çalışan mevcut değerlerin aynısı) ---
 TARGET_URL   = "https://termine-reservieren.de/termine/buergeramt.mainz/"
 UNIT_TEXT    = "Abteilung Ausländerangelegenheiten"
 CONCERN_TEXT = "Überträge von Aufenthaltstiteln (neuer Pass)"
 
-WINDOW_DAYS  = int(os.getenv("WINDOW_DAYS", "10"))
+WINDOW_DAYS  = int(os.getenv("WINDOW_DAYS", "12"))
 STATE_FILE   = os.getenv("STATE_FILE", ".state_earliest.txt")
 INTERVAL_MIN = int(os.getenv("CHECK_INTERVAL_MINUTES", "12"))
 
 SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
-SMTP_USER = "SENINMAILADRESIN@gmail.com"     # Kendi Gmail adresin
-SMTP_PASS = "GMAILAPPKODU"      # Google App Password (boşluksuz)
-MAIL_TO   = "SENINMAILADRESIN6@gmail.com"     # Kendine de olabilir
+SMTP_USER = "YourGmail@gmail.com"     # Your mail
+SMTP_PASS = "YourAppCode"           # Gmail app password
+MAIL_TO   = "YourGmail@gmail.com"     # Your or target mail
 
 UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
@@ -110,6 +107,138 @@ def click_by_text(page, text):
         pass
     return False
 
+def click_by_exact_text(page, text):
+    # Adı tam olarak text olan button/link'e öncelik ver
+    pattern = re.compile(rf"^\s*{re.escape(text)}\s*$")
+
+    for role in ["button", "link"]:
+        try:
+            el = page.get_by_role(role, name=pattern)
+            if el.count() and el.first.is_visible():
+                el.first.scroll_into_view_if_needed()
+                page.wait_for_timeout(100)
+                el.first.click()
+                return True
+        except Exception:
+            pass
+
+    # Son çare: metin düğümü tam eşleşme (gevşek değil!)
+    try:
+        el = page.get_by_text(text, exact=True)
+        if el.count() and el.first.is_visible():
+            el.first.scroll_into_view_if_needed()
+            page.wait_for_timeout(100)
+            el.first.click()
+            return True
+    except Exception:
+        pass
+
+    return False
+def click_plus_for_label_auto(page, expected_label: str) -> bool:
+    """
+    Sayfadaki TÜM '+' butonlarını gezer.
+    Her birinin ait olduğu satırın metnini okur;
+    metinde expected_label geçiyorsa o satırın '+' butonuna tıklar.
+    """
+    # Tüm '+' adaylarını topla
+    pluses = page.locator(
+        "xpath=//button[normalize-space(.)='+'] | //*[@role='button' and normalize-space(.)='+']"
+    )
+    total = pluses.count()
+    if total == 0:
+        return False
+
+    for i in range(total):
+        btn = pluses.nth(i)
+
+        # Bu '+' butonunun satır/kapsayıcısını bul (li/tr/div önceliği)
+        container = None
+        for xp in ["xpath=ancestor::li[1]", "xpath=ancestor::tr[1]", "xpath=ancestor::div[1]"]:
+            try:
+                cand = btn.locator(xp)
+                if cand.count():
+                    container = cand.first
+                    break
+            except Exception:
+                pass
+        if container is None:
+            container = btn
+
+        # Satır metnini oku ve eşleşmeyi kontrol et
+        try:
+            container.scroll_into_view_if_needed()
+            page.wait_for_timeout(120)
+            text_in_row = container.inner_text().strip()
+        except Exception:
+            text_in_row = ""
+
+        # Bazı sayfalarda whitespace/çizgi farkları olabiliyor; normalize et
+        norm = " ".join(text_in_row.split())
+        if expected_label in norm:
+            try:
+                btn.scroll_into_view_if_needed()
+                page.wait_for_timeout(120)
+                btn.click(timeout=2000, force=True)
+                return True
+            except Exception:
+                return False
+
+    return False
+
+
+# →→→ YENİ: “+”ları indexle ve satır metnini doğrula
+def click_plus_by_index_with_check(page, index_one_based: int, expected_label: str) -> bool:
+    """
+    Sayfadaki TÜM '+' butonlarını yukarıdan aşağı sırala,
+    index_one_based'inci olana tıkla (1 tabanlı!). Tıklamadan önce,
+    aynı satır/container içinde expected_label geçtiğini doğrula.
+    """
+    # 1) Tüm '+' butonlarını topla (role=button veya yazısı '+')
+    pluses = page.locator(
+        "xpath=//button[normalize-space(.)='+'] | //*[@role='button' and normalize-space(.)='+']"
+    )
+    cnt = pluses.count()
+    if cnt == 0:
+        return False
+    if index_one_based < 1 or index_one_based > cnt:
+        return False
+
+    btn = pluses.nth(index_one_based - 1)
+
+    # 2) Aynı SATIR/KAPSAYICIYI bul (li/tr/div önceliği)
+    container = None
+    for xp in ["xpath=ancestor::li[1]", "xpath=ancestor::tr[1]", "xpath=ancestor::div[1]"]:
+        try:
+            cand = btn.locator(xp)
+            if cand.count():
+                container = cand.first
+                break
+        except Exception:
+            pass
+    if container is None:
+        container = btn
+
+    # 3) Satır içinde beklenen metin gerçekten var mı?
+    try:
+        container.scroll_into_view_if_needed()
+        page.wait_for_timeout(150)
+        text_in_row = container.inner_text().strip()
+    except Exception:
+        text_in_row = ""
+
+    if expected_label not in text_in_row:
+        log(f"[DEBUG] Beklenen etiket bulunmadı. Satır metni: {text_in_row[:200]}")
+        return False
+
+    # 4) '+' butonunu tıkla
+    try:
+        btn.scroll_into_view_if_needed()
+        page.wait_for_timeout(120)
+        btn.click(timeout=2000, force=True)
+        return True
+    except Exception:
+        return False
+
 def search_and_select(page, query):
     try:
         inp = page.locator("input[type='search'], input[aria-label*='Suche'], input[placeholder*='Suche']")
@@ -140,6 +269,43 @@ def infer_date_from_calendar(day_text: str, heading: str) -> date | None:
             return None
         return date(int(year_str), month, day_num)
     except Exception:
+        return None
+
+def find_dates_anywhere(page) -> list[date] | None:
+    try:
+        html = page.content()
+        ds = []
+        for d_, m_, y_ in re.findall(r"\b(\d{1,2})\.(\d{1,2})\.(\d{4})\b", html):
+            try:
+                ds.append(date(int(y_), int(m_), int(d_)))
+            except:
+                pass
+        return sorted(set(ds)) or None
+    except:
+        return None
+
+def find_next_termin_from_text(page) -> date | None:
+    """'Nächster Termin ab 15.10.2025, 09:30 Uhr' metninden tarihi yakalar."""
+    try:
+        txt = page.inner_text("body")
+    except:
+        return None
+
+    m = re.search(r"Nächster\s+Termin\s+ab\s+(\d{1,2}\.\d{1,2}\.\d{4}).*?(\d{1,2}:\d{2})\s*Uhr",
+                  txt, re.IGNORECASE | re.DOTALL)
+    if not m:
+        m = re.search(r"Nächster\s+Termin.*?(\d{1,2}\.\d{1,2}\.\d{4})",
+                      txt, re.IGNORECASE | re.DOTALL)
+        if not m:
+            return None
+        d_, m_, y_ = map(int, m.group(1).split("."))
+        return date(y_, m_, d_)
+
+    date_str = m.group(1)
+    try:
+        d_, m_, y_ = map(int, date_str.split("."))
+        return date(y_, m_, d_)
+    except:
         return None
 
 def try_find_earliest_date(page) -> date | None:
@@ -187,7 +353,7 @@ def try_find_earliest_date(page) -> date | None:
 
 def check_once() -> tuple[date | None, date | None]:
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(channel="chrome", headless=True)
+        browser = pw.chromium.launch(channel="chrome", headless=False, slow_mo=800)
         context = browser.new_context(user_agent=UA)
         page = context.new_page()
         page.set_default_timeout(15000)
@@ -202,44 +368,111 @@ def check_once() -> tuple[date | None, date | None]:
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(300)
 
-        # Aynı anlamdaki farklı yazımları sırayla dene
+        # --- '+': Metne göre satırı bul ve aynı satırdaki + butonunu tıkla ---
+        try:
+            label = "Überträge von Aufenthaltstiteln (neuer Pass)"
+            node = page.locator(
+                "xpath=//*[normalize-space(.)=" + repr(label) + "]"
+            ).first
+            container = None
+            for xp in ["xpath=ancestor::li[1]", "xpath=ancestor::tr[1]", "xpath=ancestor::div[1]"]:
+                cand = node.locator(xp)
+                if cand.count():
+                    container = cand.first
+                    break
+            if container is None:
+                container = node
+
+            row_text = container.inner_text().strip()
+            if label not in row_text:
+                raise Exception(f"Yanlış satır: {row_text[:120]}")
+
+            plus = container.locator(
+                "button:has-text('+'), "
+                "[role='button']:has-text('+'), "
+                "button[aria-label*='erhöh' i], button[title*='erhöh' i], "
+                "button[aria-label*='erhoh' i], button[title*='erhoh' i], "
+                "button:has(svg), [role='button']:has(svg)"
+            )
+            count = plus.count()
+            if count == 0:
+                raise Exception("Bu satırda '+' butonu bulunamadı")
+            btn = plus.nth(count - 1)
+            btn.scroll_into_view_if_needed()
+            page.wait_for_timeout(200)
+            btn.click(timeout=2500, force=True)
+            log("[OK] '+' başarıyla tıklandı.")
+        except Exception as e:
+            log(f"[ERROR] '+' tıklanamadı: {e}")
+            context.close()
+            browser.close()
+            return None, load_state()
+
+
+        # --- Anliegen: yalnızca TAM eşleşme ---
         CONCERN_CANDIDATES = [
             CONCERN_TEXT,
             "Überträge von Aufenthaltstiteln (Neuer Pass)",
-            "Überträge von Aufenthaltstiteln",
             "Uebertraege von Aufenthaltstiteln (neuer Pass)",
-            "Ueberträge von Aufenthaltstiteln (neuer Pass)",  # olası encoding varyasyonu
-            "Aufenthaltstitel Übertrag",
-            "Aufenthaltstitel Uebertrag",
         ]
 
         clicked = False
         for txt in CONCERN_CANDIDATES:
-            if txt and click_by_text(page, txt):
+            if txt and click_by_exact_text(page, txt):
                 clicked = True
                 break
-
-        if not clicked:
-            # Sayfada arama kutusu varsa önce yazıp sonra tıklamayı dene
-            for txt in CONCERN_CANDIDATES:
-                search_and_select(page, txt)
-                if click_by_text(page, txt):
-                    clicked = True
-                    break
-
         if not clicked:
             raise AssertionError(f"Anliegen bulunamadı (denenenler: {CONCERN_CANDIDATES})")
 
         page.wait_for_load_state("networkidle")
         page.wait_for_timeout(600)
 
-        found = try_find_earliest_date(page)
+
+
+
+        # Weiter/Fortfahren
+        weiter_clicked = False
+        for nm in ["Weiter", "Fortfahren", "weiter", "WEITER"]:
+            try:
+                btn = page.get_by_role("button", name=nm)
+                if btn.count() and btn.first.is_visible():
+                    btn.first.click()
+                    weiter_clicked = True
+                    break
+            except:
+                pass
+        if not weiter_clicked:
+            try:
+                link = page.get_by_role("link", name="Weiter")
+                if link.count() and link.first.is_visible():
+                    link.first.click()
+                    weiter_clicked = True
+            except:
+                pass
+        if not weiter_clicked:
+            raise AssertionError("Weiter/Fortfahren butonu bulunamadı.")
+
+        # Son sayfa yüklensin
+        page.wait_for_load_state("networkidle")
+        page.wait_for_timeout(800)
+
+        # 1) 'Nächster Termin ab ... Uhr' metninden dene
+        found = find_next_termin_from_text(page)
+
+        # 2) Olmazsa takvim/listeden dene
+        if not found:
+            found = try_find_earliest_date(page)
+
+        # 3) Yedek: tüm sayfada dd.mm.yyyy tara
+        if not found:
+            any_dates = find_dates_anywhere(page)
+            if any_dates:
+                found = any_dates[0]
+                log(f"Yedek tarama ile tarih bulundu: {found}")
 
         context.close()
         browser.close()
         return found, load_state()
-
-
 
 def main_loop():
     while True:
@@ -253,7 +486,8 @@ def main_loop():
 
             log(f"found={found} last_known={last_known} in_window={in_window} earlier_than_last={earlier_than_last}")
 
-            if in_window and earlier_than_last:
+            # TEST için: pencere içinde herhangi bir tarih → mail
+            if in_window and found:
                 subject = "[Mainz] Ausländerbehörde — Überträge von Aufenthaltstiteln (neuer Pass)"
                 body = (
                     f"En erken uygun tarih: {found}\n\n"
